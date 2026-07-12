@@ -68,7 +68,7 @@ npm run preview
 ### 5. **Bilan du jour**
 - Encaissement du jour
 - Statistiques rapides
-- Historique des commandes retirées
+- Historique des commandes retirée
 
 ---
 
