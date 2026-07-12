@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
-import { addProduct, getTodayProducts } from '../services/supabase'
+import { supabase } from '../services/supabase'
 
 export default function AddProduct({ userId }) {
   const [products, setProducts] = useState([])
+  const [productReferences, setProductReferences] = useState([])
   const [loading, setLoading] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [formData, setFormData] = useState({
-    name: '',
+    productRefId: '',
     quantity: '',
     unit: 'kg',
     price: '',
@@ -16,15 +17,41 @@ export default function AddProduct({ userId }) {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
+  const unitOptions = ['kg', 'caisse', 'botte', 'pièce', 'sac', 'litre', 'boîte', 'douzaine', 'pot']
+
   useEffect(() => {
-    loadProducts()
+    loadData()
   }, [userId])
 
-  const loadProducts = async () => {
+  const loadData = async () => {
     setLoading(true)
-    const data = await getTodayProducts(userId)
-    setProducts(data)
-    setLoading(false)
+    try {
+      // Charger les produits du référentiel
+      const { data: refData, error: refError } = await supabase
+        .from('product_references')
+        .select('*')
+        .order('category', { ascending: true })
+
+      if (refError) throw refError
+      setProductReferences(refData || [])
+
+      // Charger les produits du jour (arrivages)
+      const today = new Date().toISOString().split('T')[0]
+      const { data: productsData, error: productsError } = await supabase
+        .from('products')
+        .select('*, product_references(name)')
+        .eq('user_id', userId)
+        .gte('created_at', `${today}T00:00:00`)
+        .order('created_at', { ascending: false })
+
+      if (productsError) throw productsError
+      setProducts(productsData || [])
+    } catch (err) {
+      console.error('Erreur:', err)
+      setError('Erreur lors du chargement')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleChange = (e) => {
@@ -38,23 +65,36 @@ export default function AddProduct({ userId }) {
     setSuccess('')
 
     try {
-      if (!formData.name || !formData.quantity || !formData.price || !formData.deadline) {
+      if (!formData.productRefId || !formData.quantity || !formData.price || !formData.deadline) {
         setError('Tous les champs sont requis')
         return
       }
 
-      await addProduct(userId, {
-        name: formData.name,
-        quantity: parseFloat(formData.quantity),
-        unit: formData.unit,
-        price: parseFloat(formData.price),
-        deadline: formData.deadline,
-        photoUrl: formData.photoUrl,
-      })
+      // Récupérer le produit du référentiel pour le nom
+      const productRef = productReferences.find(p => p.id === formData.productRefId)
+      if (!productRef) {
+        setError('Produit invalide')
+        return
+      }
 
-      setSuccess(`✓ ${formData.name} ajouté avec succès`)
+      const { data, error } = await supabase
+        .from('products')
+        .insert({
+          user_id: userId,
+          product_reference_id: formData.productRefId,
+          quantity: parseFloat(formData.quantity),
+          unit: formData.unit,
+          price: parseFloat(formData.price),
+          deadline: formData.deadline,
+          photo_url: formData.photoUrl,
+        })
+        .select()
+
+      if (error) throw error
+
+      setSuccess(`✓ ${productRef.name} ajouté avec succès`)
       setFormData({
-        name: '',
+        productRefId: '',
         quantity: '',
         unit: 'kg',
         price: '',
@@ -62,7 +102,7 @@ export default function AddProduct({ userId }) {
         photoUrl: '',
       })
       setShowForm(false)
-      loadProducts()
+      loadData()
     } catch (err) {
       setError(err.message || 'Erreur lors de l\'ajout')
     }
@@ -78,7 +118,8 @@ export default function AddProduct({ userId }) {
     sheet += `📅 ${new Date().toLocaleDateString('fr-FR')}\n\n`
 
     products.forEach((product, idx) => {
-      sheet += `${idx + 1}. ${product.name}\n`
+      const productName = product.product_references?.name || 'Produit'
+      sheet += `${idx + 1}. ${productName}\n`
       sheet += `   • Quantité: ${product.quantity} ${product.unit}\n`
       sheet += `   • Prix: ${product.price} MAD/${product.unit}\n`
       sheet += `   • Retrait avant: ${product.deadline}\n\n`
@@ -87,9 +128,25 @@ export default function AddProduct({ userId }) {
     sheet += `⏰ Pas de stock garanti après les horaires indiqués\n`
     sheet += `📞 Commande par WhatsApp`
 
-    // Copier au clipboard
     navigator.clipboard.writeText(sheet)
     setSuccess('✓ Feuille de prix copiée au clipboard!')
+  }
+
+  // Grouper les produits du référentiel par catégorie
+  const productsByCategory = {}
+  productReferences.forEach(product => {
+    if (!productsByCategory[product.category]) {
+      productsByCategory[product.category] = []
+    }
+    productsByCategory[product.category].push(product)
+  })
+
+  const categoryLabels = {
+    légumes: '🥬 Légumes',
+    fruits: '🍎 Fruits',
+    viande: '🥩 Viande',
+    poisson: '🐟 Poisson & Fruits de mer',
+    épicerie: '🛍️ Épicerie',
   }
 
   return (
@@ -112,7 +169,7 @@ export default function AddProduct({ userId }) {
           onClick={() => setShowForm(!showForm)}
           className="px-6 py-2 bg-market-600 hover:bg-market-700 text-white rounded-lg transition font-medium"
         >
-          {showForm ? '✕ Fermer' : '➕ Ajouter un produit'}
+          {showForm ? '✕ Fermer' : '➕ Ajouter un arrivage'}
         </button>
         <button
           onClick={generatePriceSheet}
@@ -122,7 +179,7 @@ export default function AddProduct({ userId }) {
           📋 Générer ma feuille de prix
         </button>
         <button
-          onClick={loadProducts}
+          onClick={loadData}
           className="px-6 py-2 bg-gray-400 hover:bg-gray-500 text-white rounded-lg transition font-medium"
         >
           🔄 Actualiser
@@ -132,26 +189,35 @@ export default function AddProduct({ userId }) {
       {/* Formulaire */}
       {showForm && (
         <form onSubmit={handleSubmit} className="bg-white p-6 rounded-lg shadow border border-gray-200">
-          <h3 className="text-lg font-bold mb-4 text-market-700">Ajouter un produit</h3>
+          <h3 className="text-lg font-bold mb-4 text-market-700">Ajouter un arrivage</h3>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
+            <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Produit
+                Produit *
               </label>
-              <input
-                type="text"
-                name="name"
-                value={formData.name}
+              <select
+                name="productRefId"
+                value={formData.productRefId}
                 onChange={handleChange}
-                placeholder="ex: Tomate, Pomme de terre..."
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-market-500 outline-none"
-              />
+              >
+                <option value="">-- Sélectionner un produit --</option>
+                {Object.entries(productsByCategory).map(([category, products]) => (
+                  <optgroup key={category} label={categoryLabels[category]}>
+                    {products.map(product => (
+                      <option key={product.id} value={product.id}>
+                        {product.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Quantité
+                Quantité *
               </label>
               <input
                 type="number"
@@ -166,7 +232,7 @@ export default function AddProduct({ userId }) {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Unité
+                Unité de vente *
               </label>
               <select
                 name="unit"
@@ -174,17 +240,17 @@ export default function AddProduct({ userId }) {
                 onChange={handleChange}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-market-500 outline-none"
               >
-                <option value="kg">kg</option>
-                <option value="caisse">caisse</option>
-                <option value="botte">botte</option>
-                <option value="pièce">pièce</option>
-                <option value="sac">sac</option>
+                {unitOptions.map(unit => (
+                  <option key={unit} value={unit}>
+                    {unit}
+                  </option>
+                ))}
               </select>
             </div>
 
-            <div>
+            <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Prix par unité (MAD)
+                Prix par unité (MAD) *
               </label>
               <input
                 type="number"
@@ -197,9 +263,9 @@ export default function AddProduct({ userId }) {
               />
             </div>
 
-            <div className="md:col-span-2">
+            <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Heure limite de retrait
+                Heure limite de retrait *
               </label>
               <input
                 type="time"
@@ -210,9 +276,9 @@ export default function AddProduct({ userId }) {
               />
             </div>
 
-            <div className="md:col-span-2">
+            <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                URL de la photo (optionnel)
+                Photo (optionnel)
               </label>
               <input
                 type="url"
@@ -229,7 +295,7 @@ export default function AddProduct({ userId }) {
             type="submit"
             className="mt-6 w-full bg-market-600 hover:bg-market-700 text-white font-bold py-2 px-4 rounded-lg transition"
           >
-            ✓ Ajouter le produit
+            ✓ Ajouter l'arrivage
           </button>
         </form>
       )}
@@ -238,7 +304,7 @@ export default function AddProduct({ userId }) {
       <div className="bg-white rounded-lg shadow">
         <div className="p-6 border-b border-gray-200">
           <h3 className="text-lg font-bold text-market-700">
-            Produits du jour ({products.length})
+            Arrivages du jour ({products.length})
           </h3>
         </div>
 
@@ -249,8 +315,8 @@ export default function AddProduct({ userId }) {
           </div>
         ) : products.length === 0 ? (
           <div className="p-8 text-center text-gray-600">
-            <p className="text-lg mb-2">📦 Aucun produit ajouté aujourd'hui</p>
-            <p className="text-sm">Cliquez sur "Ajouter un produit" pour commencer</p>
+            <p className="text-lg mb-2">📦 Aucun arrivage aujourd'hui</p>
+            <p className="text-sm">Clique sur "Ajouter un arrivage" pour commencer</p>
           </div>
         ) : (
           <div className="divide-y divide-gray-200">
@@ -258,7 +324,9 @@ export default function AddProduct({ userId }) {
               <div key={product.id} className="p-6 hover:bg-gray-50 transition">
                 <div className="flex justify-between items-start mb-3">
                   <div>
-                    <h4 className="text-lg font-bold text-gray-900">{product.name}</h4>
+                    <h4 className="text-lg font-bold text-gray-900">
+                      {product.product_references?.name || 'Produit'}
+                    </h4>
                     <p className="text-sm text-gray-600">
                       Ajouté à {new Date(product.created_at).toLocaleTimeString('fr-FR', {
                         hour: '2-digit',
@@ -273,7 +341,7 @@ export default function AddProduct({ userId }) {
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                   <div>
-                    <p className="text-gray-600">Stock</p>
+                    <p className="text-gray-600">Quantité</p>
                     <p className="font-bold text-lg text-market-600">
                       {product.quantity} {product.unit}
                     </p>

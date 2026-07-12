@@ -154,7 +154,7 @@ export default function OrderBook({ userId }) {
                 <option value="">-- Sélectionner un produit --</option>
                 {products.map(product => (
                   <option key={product.id} value={product.id}>
-                    {product.name} - {product.quantity} {product.unit} à {product.price} MAD
+                    {product.product_references?.name || 'Produit'} - {product.quantity} {product.unit} à {product.price} MAD
                   </option>
                 ))}
               </select>
@@ -201,7 +201,7 @@ export default function OrderBook({ userId }) {
 
       {products.length === 0 && (
         <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800 text-sm">
-          ⚠️ Aucun produit disponible. Ajoutez d'abord des produits.
+          ⚠️ Aucun produit disponible. Ajoute d'abord des arrivages.
         </div>
       )}
 
@@ -253,7 +253,7 @@ export default function OrderBook({ userId }) {
                   <div>
                     <h4 className="text-lg font-bold text-gray-900">{order.client_name}</h4>
                     <p className="text-sm text-gray-600">
-                      {order.products?.name} • {order.quantity} {order.products?.unit}
+                      {order.products?.product_references?.name || 'Produit'} • {order.quantity} {order.products?.unit}
                     </p>
                   </div>
                   <span className={`px-3 py-1 rounded text-sm font-medium ${getStatusColor(order.status)}`}>

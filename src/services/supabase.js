@@ -97,14 +97,14 @@ export const addProduct = async (userId, product) => {
       .from('products')
       .insert({
         user_id: userId,
-        name: product.name,
+        product_reference_id: product.productRefId,
         quantity: product.quantity,
         unit: product.unit,
         price: product.price,
         photo_url: product.photoUrl,
         deadline: product.deadline,
       })
-      .select()
+      .select('*, product_references(name)')
 
     if (error) throw error
     return data[0]
@@ -118,7 +118,7 @@ export const getTodayProducts = async (userId) => {
     const today = new Date().toISOString().split('T')[0]
     const { data, error } = await supabase
       .from('products')
-      .select('*')
+      .select('*, product_references(name)')
       .eq('user_id', userId)
       .gte('created_at', `${today}T00:00:00`)
       .order('created_at', { ascending: false })
@@ -157,7 +157,7 @@ export const getTodayOrders = async (userId) => {
     const today = new Date().toISOString().split('T')[0]
     const { data, error } = await supabase
       .from('orders')
-      .select('*, products(*)')
+      .select('*, products(*, product_references(name))')
       .eq('user_id', userId)
       .gte('created_at', `${today}T00:00:00`)
       .order('created_at', { ascending: false })
@@ -190,7 +190,7 @@ export const getClientHistory = async (userId) => {
   try {
     const { data, error } = await supabase
       .from('orders')
-      .select('client_name, quantity, products(price, name), created_at')
+      .select('client_name, quantity, products(price, product_references(name)), created_at')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(100)
